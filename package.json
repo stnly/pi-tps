@@ -6,7 +6,9 @@
   "scripts": {
     "clean": "rm -rf dist",
     "build": "tsc",
-    "check": "tsc --noEmit"
+    "check": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "pi": {
     "extensions": [
@@ -14,8 +16,9 @@
     ]
   },
   "devDependencies": {
+    "@mariozechner/pi-coding-agent": "*",
     "typescript": "^5.7.0",
-    "@mariozechner/pi-coding-agent": "*"
+    "vitest": "^4.1.4"
   },
   "peerDependencies": {
     "@mariozechner/pi-coding-agent": "*"
