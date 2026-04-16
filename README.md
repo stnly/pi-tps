@@ -49,6 +49,7 @@ Or copy/symlink this directory into your pi extensions path.
 ```bash
 npm install
 npm run check    # type-check with tsc
+npm test         # run test suite
 ```
 
 ## How It Works
@@ -57,4 +58,3 @@ npm run check    # type-check with tsc
 - **Exchange tracking**: Groups assistant messages into exchanges (user prompt → final response via `agent_start`/`agent_end`). Exchange TPS is calculated from actual tokens divided by accumulated streaming time.
 - **Streaming time**: Measured from first output event (including `thinking_start`) to `message_end`, excluding idle gaps between chunks (e.g., during tool execution).
 - **Session medians**: Persists TTFT and TPS from each completed exchange, capped at 50 entries. Only exchanges with >= 500ms streaming time contribute TPS values.
-- **Debug log**: Appends per-chunk stats to `/tmp/pi-perf-debug.log`.
