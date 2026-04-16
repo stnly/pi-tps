@@ -36,7 +36,19 @@ TTFT 3.7s TPS 67.0
 pi install git:github.com/stnly/pi-tps
 ```
 
-Or add manually to your pi extensions configuration:
+Or add to your pi packages configuration:
+
+```json
+{
+  "packages": [
+    {
+      "source": "git:github.com/stnly/pi-tps"
+    }
+  ]
+}
+```
+
+Or add manually to your extensions configuration:
 
 ```json
 {
