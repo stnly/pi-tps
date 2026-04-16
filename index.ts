@@ -237,9 +237,8 @@ export default function tpsExtension(pi: FullExtensionAPI): void {
     fs.appendFileSync("/tmp/pi-perf-debug.log",
       `[perf] actualTokens=${actualTokens} chunkStreamingMs=${chunkStreamingMs} firstTokenTs=${firstTokenTs} now=${now} chunkStart=${chunkStart} TTFT=${chunkTtft}\n`);
 
-    // Accumulate into exchange
+    // Accumulate into exchange (streaming time already added by closeStreamingPeriod)
     if (currentExchange) {
-      currentExchange.streamingMs += chunkStreamingMs;
       if (actualTokens !== null) {
         currentExchange.totalActualTokens += actualTokens;
       }
