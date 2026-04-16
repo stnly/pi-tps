@@ -9,7 +9,7 @@ A [pi](https://github.com/badlogic/pi-coding-agent) extension that displays mode
 | **TTFT** | Time to First Token — from request start to first output token (includes thinking) |
 | **TPS** | Tokens Per Second — output throughput using actual provider token counts |
 
-During streaming, the extension shows TTFT once known. On `message_end`, it shows the chunk's TTFT and TPS. When idle, it displays session median values for both metrics.
+During streaming, the extension calculates stats in the background. The status line only updates on `agent_end`, showing session median values for both metrics.
 
 TPS is only computed when streaming time is >= 500ms. Short responses (e.g., tool calls) arrive as bursts with unreliable timing and show "—" instead.
 
@@ -25,9 +25,9 @@ The extension adds a `TTFT` and `TPS` entry to pi's status line:
 TTFT 3.7s TPS 67.0
 ```
 
-- During streaming: shows TTFT once the first token arrives (e.g. `TTFT 3.7s TPS —`)
-- On `message_end`: shows chunk stats (e.g. `TTFT 3.7s TPS 67.0`)
-- When idle: shows session medians (e.g. `TTFT 2.1s TPS 51.3`)
+- During streaming: calculates stats in background, displays previous session medians (e.g. `TTFT 2.1s TPS 51.3`)
+- On `message_end`: accumulates chunk stats into exchange, display unchanged
+- When idle (after `agent_end`): shows updated session medians (e.g. `TTFT 2.1s TPS 51.3`)
 - Short burst responses show `TPS —` (streaming time < 500ms)
 
 ## Installation

@@ -5,8 +5,9 @@
  * - TTFT: Time to First Token (request → first output token, including thinking)
  * - TPS:  Tokens Per Second (output throughput using actual provider token counts)
  *
- * Updates status on message_end with chunk stats, switches to session
- * medians on agent_end. TPS is only shown when streaming time >= 500ms.
+ * Calculates chunk stats in the background. The status line only updates
+ * at agent_end, showing session median values for both metrics.
+ * TPS is only shown when streaming time >= 500ms.
  *
  * Tracking hierarchy:
  * - Chunk: each assistant message (message_start → message_end)
@@ -244,7 +245,7 @@ export default function tpsExtension(pi: FullExtensionAPI): void {
       }
     }
 
-    renderStats(chunkTtft, computeTps(chunkTokens, chunkStreamingMs));
+    // Chunk stats accumulated into exchange; display updates at agent_end
   });
 
   pi.on("session_shutdown", () => {});
