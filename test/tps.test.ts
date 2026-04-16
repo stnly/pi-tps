@@ -52,16 +52,6 @@ function createMockCtx(hasUI = true) {
 
 // --- Module-level setup ---
 
-// Stub require so the debug log in message_end doesn't write to /tmp
-vi.stubGlobal(
-  "require",
-  (mod: string) => {
-    if (mod === "node:fs") return { appendFileSync: () => {} };
-    // @ts-expect-error dynamic import
-    return vi.importActual(mod);
-  },
-);
-
 let tpsExtension: (pi: any) => void;
 
 beforeAll(async () => {
@@ -109,8 +99,9 @@ function startSession() {
  * @param ttftAdvance ms from agent_start to first token
  * @param streamAdvance ms from first token to message_end
  * @param tokens output token count
+ * @param eventType the output event type for message_update
  */
-function runExchange(ttftAdvance: number, streamAdvance: number, tokens: number) {
+function runExchange(ttftAdvance: number, streamAdvance: number, tokens: number, eventType = "text_delta") {
   emit("agent_start", {});
   vi.advanceTimersByTime(50); // brief delay before message
   emit("message_start", {
@@ -121,7 +112,7 @@ function runExchange(ttftAdvance: number, streamAdvance: number, tokens: number)
   emit("message_update", {
     type: "message_update",
     message: { role: "assistant", usage: {} },
-    assistantMessageEvent: { type: "text_delta" },
+    assistantMessageEvent: { type: eventType },
   });
   vi.advanceTimersByTime(streamAdvance);
   emit("message_end", {
@@ -258,23 +249,8 @@ describe("pi-tps", () => {
       emit("agent_end", {});
 
       // exchange TTFT = 50ms (agent_start → first token of chunk 1)
-      // streaming = 550 + 550 = 1100ms (wait, closeStreamingPeriod tracks from streamStartTs)
-      // Actually: chunk1 streaming = 550ms (from first token at +50 to message_end at +550)
-      //           chunk2 streaming = 550ms
-      //           total = 1100ms
-      // tokens = 100, TPS = 100/1.1 = 90.9
-
-      // Hmm, let me recalculate. In message_update, firstTokenTs and streamStartTs
-      // are both set. In message_end, closeStreamingPeriod adds (now - streamStartTs).
-      // streamStartTs was set at T=50 (relative to chunk start), message_end at T=550.
-      // So chunk1 streaming = 500ms (550-50), chunk2 streaming = 500ms, total = 1000ms
-      // Wait no, the 50ms advance before message_update IS the TTFT portion.
-      // message_start at T=0, advance 50ms → T=50 (message_update, firstToken)
-      // advance 500ms → T=550 (message_end)
-      // closeStreamingPeriod: streamingMs += 550-50 = 500ms
-      // Same for chunk2: 500ms
-      // Total: 1000ms, tokens=100, TPS=100.0
-
+      // streaming = 500 + 500 = 1000ms
+      // tokens = 100, TPS = 100/1.0 = 100.0
       const s = parseStatus(status());
       expect(s.ttft).toBe("50ms");
       expect(s.tps).toBe("100.0");
@@ -313,7 +289,8 @@ describe("pi-tps", () => {
     ])("'%s' triggers TTFT tracking", (eventType) => {
       setup();
       startSession();
-      runExchange(250, 500, 25);
+      // Each event type is passed to runExchange as the message_update type
+      runExchange(250, 500, 25, eventType);
       const s = parseStatus(status());
       expect(s.ttft).toBe("250ms");
     });
@@ -553,6 +530,72 @@ describe("pi-tps", () => {
       const s = parseStatus(status());
       expect(s.ttft).toBe("100ms");
       expect(s.tps).toBe("—");
+    });
+
+    it("handles message_start/message_end without agent_start", () => {
+      setup();
+      startSession();
+      // Orphan messages — no exchange to accumulate into
+      emit("message_start", {
+        type: "message_start",
+        message: { role: "assistant", usage: {} },
+      });
+      vi.advanceTimersByTime(100);
+      emit("message_update", {
+        type: "message_update",
+        message: { role: "assistant", usage: {} },
+        assistantMessageEvent: { type: "text_delta" },
+      });
+      vi.advanceTimersByTime(900);
+      emit("message_end", {
+        type: "message_end",
+        message: { role: "assistant", usage: { output: 100 } },
+      });
+
+      // No agent_end → no medians computed, still showing dashes
+      const s = parseStatus(status());
+      expect(s.ttft).toBe("—");
+      expect(s.tps).toBe("—");
+    });
+
+    it("handles session_shutdown", () => {
+      setup();
+      startSession();
+      runExchange(100, 1000, 100);
+
+      // After shutdown, internal state should be reset
+      emit("session_shutdown", {});
+
+      // New session_start restores a valid context — use pi.emit directly
+      // since emit() helper uses the old ctx which has no UI after shutdown
+      const newCtx = createMockCtx();
+      pi.emit("session_start", {}, newCtx);
+
+      // Run a single exchange in the new session using the new ctx
+      pi.emit("agent_start", {});
+      vi.advanceTimersByTime(50);
+      pi.emit("message_start", {
+        type: "message_start",
+        message: { role: "assistant", usage: {} },
+      }, newCtx);
+      vi.advanceTimersByTime(150); // TTFT from agent_start = 200ms
+      pi.emit("message_update", {
+        type: "message_update",
+        message: { role: "assistant", usage: {} },
+        assistantMessageEvent: { type: "text_delta" },
+      }, newCtx);
+      vi.advanceTimersByTime(800); // streaming = 800ms
+      pi.emit("message_end", {
+        type: "message_end",
+        message: { role: "assistant", usage: { output: 40 } },
+      }, newCtx);
+      pi.emit("agent_end", {});
+
+      // Only the post-shutdown exchange contributes — no carryover
+      // TTFT = 200ms, TPS = 40/0.8 = 50.0
+      const s = parseStatus(newCtx.getStatus("perf"));
+      expect(s.ttft).toBe("200ms");
+      expect(s.tps).toBe("50.0");
     });
   });
 

@@ -55,11 +55,10 @@ type FullExtensionAPI = ExtensionAPI & {
 
 interface ExchangeRecord {
   startTime: number;
-  endTime: number | null;
   totalActualTokens: number;
   ttftMs: number | null;
   streamingMs: number;
-  tps: number;
+  tps: number | null;
 }
 
 // --- Constants ---
@@ -96,9 +95,6 @@ export default function tpsExtension(pi: FullExtensionAPI): void {
   // Per-chunk state (reset each message_start for assistant)
   let chunkStart = 0;
   let firstTokenTs: number | null = null;
-  let chunkTtft: number | null = null;
-  let chunkTokens = 0;
-  let chunkStreamingMs = 0;
 
   // Exchange tracking
   let currentExchange: ExchangeRecord | null = null;
@@ -139,46 +135,47 @@ export default function tpsExtension(pi: FullExtensionAPI): void {
     }
   };
 
-  // --- Events ---
+  // --- State reset ---
 
-  pi.on("session_start", (_event, ctx) => {
+  const resetState = (ctx: ExtensionContext): void => {
     chunkStart = 0;
     firstTokenTs = null;
-    chunkTtft = null;
-    chunkTokens = 0;
-    chunkStreamingMs = 0;
     currentExchange = null;
     exchanges = [];
     streamStartTs = null;
     statusCtx = ctx;
+  };
+
+  // --- Events ---
+
+  pi.on("session_start", (_event, ctx) => {
+    resetState(ctx);
     renderStats(null, null);
   });
 
   pi.on("agent_start", () => {
     currentExchange = {
       startTime: Date.now(),
-      endTime: null,
       totalActualTokens: 0,
       ttftMs: null,
       streamingMs: 0,
-      tps: 0,
+      tps: null,
     };
   });
 
   pi.on("agent_end", () => {
     if (!currentExchange) return;
 
-    currentExchange.endTime = Date.now();
     closeStreamingPeriod();
 
-    currentExchange.tps = computeTps(currentExchange.totalActualTokens, currentExchange.streamingMs) ?? 0;
+    currentExchange.tps = computeTps(currentExchange.totalActualTokens, currentExchange.streamingMs);
 
     exchanges.push(currentExchange);
     if (exchanges.length > MAX_HISTORY) exchanges.shift();
     currentExchange = null;
 
     const medTtft = median(exchanges.filter(e => e.ttftMs !== null).map(e => e.ttftMs!));
-    const medTps = median(exchanges.map(e => e.tps).filter(t => t > 0));
+    const medTps = median(exchanges.filter(e => e.tps !== null).map(e => e.tps!));
     renderStats(medTtft, medTps);
   });
 
@@ -192,9 +189,6 @@ export default function tpsExtension(pi: FullExtensionAPI): void {
     // Reset per-chunk state
     chunkStart = Date.now();
     firstTokenTs = null;
-    chunkTtft = null;
-    chunkTokens = 0;
-    chunkStreamingMs = 0;
   });
 
   pi.on("message_update", (event: MessageUpdateEvent, _ctx) => {
@@ -206,7 +200,6 @@ export default function tpsExtension(pi: FullExtensionAPI): void {
     // TTFT on first output event (includes thinking start)
     if (firstTokenTs === null) {
       firstTokenTs = now;
-      chunkTtft = now - chunkStart;
       if (currentExchange && currentExchange.ttftMs === null) {
         currentExchange.ttftMs = now - currentExchange.startTime;
       }
@@ -222,30 +215,18 @@ export default function tpsExtension(pi: FullExtensionAPI): void {
     statusCtx = ctx;
     if (event.message.role !== "assistant") return;
 
-    const now = Date.now();
     const actualTokens = event.message.usage?.output ?? null;
 
     // Close streaming period for this chunk
     closeStreamingPeriod();
 
-    // Compute chunk stats
-    chunkStreamingMs = firstTokenTs !== null ? now - firstTokenTs : 0;
-    chunkTokens = actualTokens ?? 0;
-
-    // Debug log
-    const fs = require("node:fs");
-    fs.appendFileSync("/tmp/pi-perf-debug.log",
-      `[perf] actualTokens=${actualTokens} chunkStreamingMs=${chunkStreamingMs} firstTokenTs=${firstTokenTs} now=${now} chunkStart=${chunkStart} TTFT=${chunkTtft}\n`);
-
-    // Accumulate into exchange (streaming time already added by closeStreamingPeriod)
-    if (currentExchange) {
-      if (actualTokens !== null) {
-        currentExchange.totalActualTokens += actualTokens;
-      }
+    // Accumulate tokens into exchange
+    if (currentExchange && actualTokens !== null) {
+      currentExchange.totalActualTokens += actualTokens;
     }
-
-    // Chunk stats accumulated into exchange; display updates at agent_end
   });
 
-  pi.on("session_shutdown", () => {});
+  pi.on("session_shutdown", () => {
+    resetState(statusCtx ?? {} as ExtensionContext);
+  });
 }
